@@ -9,12 +9,17 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
+import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.jjoe64.graphview.GraphView;
 import com.jjoe64.graphview.series.DataPoint;
 import com.jjoe64.graphview.series.LineGraphSeries;
 
+import java.io.FileOutputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class MeasureFirmness extends AppCompatActivity implements SensorEventListener {
@@ -30,6 +35,9 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     private long lastTime = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
     private long time;
     private double yValue;
+    private List<String> dataList = new ArrayList<>();
+    private int count;
+    private long currentTime;
 
     Sensor accelerometer;
 
@@ -66,23 +74,21 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     }
 
     @Override
-    public void onAccuracyChanged(Sensor sensor, int i) {
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
 
     }
 
     @Override
     public void onSensorChanged(final SensorEvent sensorEvent) {
-        synchronized (this){
+        //synchronized (this){
             float lux = sensorEvent.values[1];
             mTextAcc.setText(String.valueOf(lux));
 
-            // Update time
+            // Time since last data recording
             time = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) - lastTime;
 
             // Set current y-coordinate value
             yValue = sensorEvent.values[1];
-
-
 
             //LineGraphSeries<DataPoint> series = new LineGraphSeries<>(new DataPoint[] {
                     //new DataPoint(sensorEvent.values[0], sensorEvent.values[1])
@@ -91,9 +97,14 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
             LineGraphSeries series = new LineGraphSeries<DataPoint>();
 
-            series.appendData(new DataPoint(time, sensorEvent.values[1]), true,100000000);
-            //series.resetData()
-            graph.addSeries(series);
+            if (time < 100 && count < 100){
+                saveData(mTextAcc);
+                currentTime = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
+                series.appendData(new DataPoint(currentTime, sensorEvent.values[1]), true, 100);
+                graph.addSeries(series);
+                count++;
+            }
+
             graph.getViewport().setScalable(true);
             graph.getViewport().setScrollable(true);
             graph.getViewport().setScalableY(true);
@@ -105,13 +116,19 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 //            graph.getViewport().setMaxY(10.00);
 
             lastTime = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
-        }
+        //}
     }
 
     @Override
     public void onResume(){
         super.onResume();
         sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+
+//        if (!dataList.isEmpty())
+//        {
+//            dataList.clear();
+//            count = 0;
+//        }
 
 //        timer1 = new Runnable(){
 //            @Override
@@ -137,7 +154,50 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     protected void onPause(){
         super.onPause();
         sensorManager.unregisterListener(this);
+
+//        if (!dataList.isEmpty())
+//        {
+//            dataList.clear();
+//            count = 0;
+//        }
+
 //        handler.removeCallbacks(timer1);
 //        handler.removeCallbacks(timer2);
+    }
+
+    public void saveOnClick(View view){
+        // Create file name
+        String EXPORT_FILE = "export.csv";
+
+        // Entry data to save to file
+        String entry;
+
+        try{
+            FileOutputStream out = openFileOutput(EXPORT_FILE, Context.MODE_APPEND);
+
+            // Save data from list to csv file
+            for (int i = 0; i < 1000; i++){
+                entry = dataList.get(i);
+                out.write(entry.getBytes());
+            }
+            out.close();
+
+            // Notify the user that the file saved successfully
+            toastIt("File saved successfully!");
+        }catch (Exception e){
+            e.printStackTrace();
+            toastIt("Save failed");
+        }
+    }
+
+    public void toastIt(String message){
+        Toast.makeText(MeasureFirmness.this, message, Toast.LENGTH_SHORT).show();
+    }
+
+    public void saveData(TextView text){
+        String data = text.toString();
+        dataList.add(data);
+
+        toastIt("Data saved!");
     }
 }
