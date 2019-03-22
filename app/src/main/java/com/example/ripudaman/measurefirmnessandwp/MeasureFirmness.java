@@ -9,13 +9,17 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.support.design.widget.FloatingActionButton;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
+import android.util.Log;
 import android.view.View;
+import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ToggleButton;
@@ -24,6 +28,8 @@ import com.jjoe64.graphview.GraphView;
 import com.jjoe64.graphview.series.DataPoint;
 import com.jjoe64.graphview.series.LineGraphSeries;
 import com.opencsv.CSVWriter;
+
+import org.apache.commons.lang3.ObjectUtils;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -52,8 +58,15 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     private List<String> dataList = new ArrayList<>();
     private int count;
     private long currentTime;
-    private ToggleButton toggleButton;
     private int mSecond;
+    private String[] entry;
+    private List<String[]> entries = new ArrayList<>();
+    private int entryElement = 0;
+    long MillisecondTime, StartTime, TimeBuff, UpdateTime = 0L;
+    Handler handler;
+    int Seconds, Minutes, MilliSeconds ;
+    private Button startButton, resetButton, pauseButton;
+    private boolean wasClicked;
 
     Sensor accelerometer;
     Sensor gyroscope;
@@ -63,13 +76,61 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_measure_firmness);
 
-        yValue = 0;
-        mSecond = 0;
-        toggleButton = (ToggleButton) findViewById(R.id.toggleButton);
+        wasClicked = false;
 
+        handler = new Handler();
 
-        // Text label that currently displays the x-coordinate of accelerometer
-        mTextAcc = findViewById(R.id.labelAcc);
+        mTextAcc = (TextView) findViewById(R.id.labelAcc);
+
+        resetButton = (Button) findViewById(R.id.button6);
+        resetButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                MillisecondTime = 0L;
+                StartTime = 0L;
+                TimeBuff = 0L;
+                UpdateTime = 0L;
+                Seconds = 0;
+                Minutes = 0;
+                MilliSeconds = 0;
+
+                mTextAcc.setText("00:00:00");
+                wasClicked = false;
+
+                entries.clear();
+
+                toastIt("RECORDING RESET");
+            }
+        });
+
+        pauseButton = (Button) findViewById(R.id.pauseButton);
+        pauseButton.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view){
+                TimeBuff += MillisecondTime;
+                handler.removeCallbacks(runnable);
+                resetButton.setEnabled(true);
+                wasClicked = false;
+
+                toastIt("RECORDING PAUSED");
+                toastIt("Size of list: " + String.valueOf(entries.size()));
+
+                // getFirmnessRating();
+            }
+        });
+
+        startButton = (Button) findViewById(R.id.startButton);
+        startButton.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view){
+                StartTime = SystemClock.uptimeMillis();
+                handler.postDelayed(runnable, 0);
+                resetButton.setEnabled(false);
+                wasClicked = true;
+
+                toastIt("RECORDING STARTED");
+            }
+        });
 
         // Instantiate sensorManager
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
@@ -78,14 +139,14 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
 
-        // Register the sensorManager to listen for accelerometer data
-        sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+        // Register the sensorManager to listen for accelerometer and gyroscope data
+        sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
+        sensorManager.registerListener(MeasureFirmness.this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
 
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 
         FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
-
         fab.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -93,7 +154,18 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             }
         });
 
-        updateTime();
+        LineGraphSeries series = new LineGraphSeries<DataPoint>();
+        GraphView graph = findViewById(R.id.graph);
+
+        series.appendData(new DataPoint(Seconds, yValue), true, 100);
+        graph.addSeries(series);
+
+        graph.getViewport().setScalable(true);
+        graph.getViewport().setScrollable(true);
+        graph.getViewport().setScalableY(true);
+        graph.getViewport().setScrollableY(true);
+
+        Log.d("WASCLICKED", String.valueOf(wasClicked));
     }
 
     @Override
@@ -104,51 +176,21 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     @Override
     public void onSensorChanged(final SensorEvent sensorEvent) {
         synchronized (this){
-            // Time since last data recording
-            time = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) - lastTime;
-
             // Set current y-coordinate value
             yValue = sensorEvent.values[1];
-
-            lastTime = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
-
-            GraphView graph = findViewById(R.id.graph);
-
-            if (toggleButton.isChecked()){
-                LineGraphSeries series = new LineGraphSeries<DataPoint>();
-                currentTime = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
-
-                String str = String.valueOf(yValue);
-                saveData(str);
-
-                series.appendData(new DataPoint(mSecond, yValue), true, 100);
-                graph.addSeries(series);
-                count++;
-            }
-
-            graph.getViewport().setScalable(true);
-            graph.getViewport().setScrollable(true);
-            graph.getViewport().setScalableY(true);
-            graph.getViewport().setScrollableY(true);
         }
     }
 
     @Override
     public void onResume(){
         super.onResume();
-        sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
-        toggleButton.setChecked(false);
-        mSecond = 0;
-        count = 0;
+        sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
     }
 
     @Override
     protected void onPause(){
         super.onPause();
         sensorManager.unregisterListener(this);
-        toggleButton.setChecked(false);
-        mSecond = 0;
-        count = 0;
     }
 
     public void saveOnClick(View view){
@@ -157,9 +199,13 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         String EXPORT_FILE = "export.csv";
         String filePath = baseDir + File.separator + EXPORT_FILE;
 
+        File pathfile = new File(Environment.getExternalStorageDirectory()
+                .getAbsolutePath()
+                + File.separator
+                + "csvData");
+
         // Entry data to save to file
-        String entry[] = new String[100];
-        File file = new File(filePath);
+        File file = new File(String.valueOf(pathfile));
         CSVWriter writer;
 
         try{
@@ -173,10 +219,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             }
 
             // Save data from list to csv file
-            for (int i = 0; i < 100; i++){
-                entry[i] = dataList.get(i);
-                writer.writeNext(entry);
-            }
+            writer.writeAll(entries);
             writer.close();
 
             // Notify the user that the file saved successfully
@@ -186,45 +229,79 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             e.printStackTrace();
             toastIt("Save failed");
         }
+
+        printList();
     }
 
     public void toastIt(String message){
         Toast.makeText(MeasureFirmness.this, message, Toast.LENGTH_SHORT).show();
     }
 
-    public void saveData(String data){
+    private Runnable runnable = new Runnable(){
+        @Override
+        public void run(){
+            MillisecondTime = SystemClock.uptimeMillis() - StartTime;
 
-        dataList.add(data);
+            UpdateTime = TimeBuff + MillisecondTime;
 
-        if (dataList.size() % 10 == 0)
-            toastIt("Data saved!");
+            Seconds = (int) (UpdateTime / 1000);
 
-        if(dataList.size() == 100)
-            toastIt("100 data points saved, current time: " + mSecond);
-    }
+            Minutes = Seconds / 60;
 
-    public void toggleClick(View v){
-        if(toggleButton.isChecked())
-            toastIt("RECORDING STARTED");
-        else if (!toggleButton.isChecked())
-            toastIt("RECORDING STOPPED");
-    }
+            Seconds = Seconds % 60;
 
-    public void updateTime(){
-        Timer timer = new Timer();
-        timer.schedule(new TimerTask() {
+            MilliSeconds = (int) (UpdateTime % 1000);
 
-            @Override
-            public void run(){
-                try{
-                    Calendar c = Calendar.getInstance();
-                    mSecond = c.get(Calendar.SECOND);
-                    mTextAcc.setText(String.valueOf(mSecond));
-                }catch(Exception e){
-                    e.printStackTrace();
-                }
+            mTextAcc.setText("" + Minutes + ":"
+                    + String.format("%02d", Seconds) + ":"
+                    + String.format("%03d", MilliSeconds));
+
+            if (wasClicked){
+                String val = String.valueOf(yValue);
+                String tim = String.valueOf(Seconds + "." + MilliSeconds);
+                entry = new String[]{tim, val};
+                entries.add(entry);
+
+                toastIt("Size of list is: " + String.valueOf(entries.size()));
             }
-        }, 0, 1000);
+
+            handler.postDelayed(this, 0);
+        }
+    };
+
+    public void printList(){
+        for (int i = 0; i < entries.size(); i++){
+            Log.d("PRINTLIST", Arrays.toString(entries.get(i)));
+        }
+    }
+
+    public int getFirmnessRating(){
+
+        int rating = 0;
+
+        // gets the y-coordinate acceleration values of recorded drop
+        for (int i = 0; i < entries.size(); i++){
+
+                 double maxY = 0;
+                 double timeOfMax = 0;
+                 double timeOfZero = 0;
+                 double timeDiff = 0;
+
+                 String val[] = entries.get(i);
+                 String stringY = val[1];
+
+                 double y = Double.valueOf(stringY);
+
+                 if (y > 0.01)
+                     timeOfZero = Double.valueOf(val[0]);
+
+                 if (y > maxY){
+                     maxY = y;
+                     timeOfMax = Double.valueOf(val[0]);
+                 }
+        }
+
+        return rating;
     }
 }
 
