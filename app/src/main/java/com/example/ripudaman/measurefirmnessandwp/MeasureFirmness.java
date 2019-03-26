@@ -55,6 +55,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     private long lastTime = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
     private long time;
     private double yValue;
+    private double zValue;
+    private double xValue;
     private List<String> dataList = new ArrayList<>();
     private int count;
     private long currentTime;
@@ -177,7 +179,25 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     public void onSensorChanged(final SensorEvent sensorEvent) {
         synchronized (this){
             // Set current y-coordinate value
-            yValue = sensorEvent.values[1];
+
+            if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER){
+                xValue = sensorEvent.values[0];
+                yValue = sensorEvent.values[1];
+                zValue = sensorEvent.values[2];
+
+                if (wasClicked){
+                    String yVal = String.valueOf(yValue);
+                    String tim = String.valueOf(Seconds + "." + MilliSeconds);
+
+                    getFirmnessRating(tim, xValue, yValue, zValue);
+
+                    entry = new String[]{tim, yVal};
+                    entries.add(entry);
+
+                    Log.d("VALUESHERE", yVal);
+                    //toastIt("Size of list is: " + String.valueOf(entries.size()));
+                }
+            }
         }
     }
 
@@ -252,18 +272,9 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
             MilliSeconds = (int) (UpdateTime % 1000);
 
-            mTextAcc.setText("" + Minutes + ":"
+            mTextAcc.setText("" + String.format("%02d",Minutes) + ":"
                     + String.format("%02d", Seconds) + ":"
                     + String.format("%03d", MilliSeconds));
-
-            if (wasClicked){
-                String val = String.valueOf(yValue);
-                String tim = String.valueOf(Seconds + "." + MilliSeconds);
-                entry = new String[]{tim, val};
-                entries.add(entry);
-
-                toastIt("Size of list is: " + String.valueOf(entries.size()));
-            }
 
             handler.postDelayed(this, 0);
         }
@@ -275,30 +286,21 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         }
     }
 
-    public int getFirmnessRating(){
+    public int getFirmnessRating(String time, double x, double y, double z){
 
         int rating = 0;
+        double rootSquare;
+
+        rootSquare = Math.sqrt(Math.pow(x ,2) + Math.pow(y ,2) + Math.pow(z ,2));
+
+        if (rootSquare < 2.0){
+            toastIt("Freefall detected");
+        }
 
         // gets the y-coordinate acceleration values of recorded drop
         for (int i = 0; i < entries.size(); i++){
 
-                 double maxY = 0;
-                 double timeOfMax = 0;
-                 double timeOfZero = 0;
-                 double timeDiff = 0;
 
-                 String val[] = entries.get(i);
-                 String stringY = val[1];
-
-                 double y = Double.valueOf(stringY);
-
-                 if (y > 0.01)
-                     timeOfZero = Double.valueOf(val[0]);
-
-                 if (y > maxY){
-                     maxY = y;
-                     timeOfMax = Double.valueOf(val[0]);
-                 }
         }
 
         return rating;
