@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">Measure firmness and wp</string>
-    <string name="title_activity_measure_firmness">MeasureFirmness</string>
-    <string name="title_activity_noise">activity_noise</string>
+    <string name="title_activity_measure_firmness">Measure Surface Firmness</string>
+    <string name="title_activity_noise">Measure Noise Ambience</string>
 </resources>

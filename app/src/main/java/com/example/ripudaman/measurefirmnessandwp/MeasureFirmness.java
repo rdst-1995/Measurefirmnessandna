@@ -34,6 +34,7 @@ import org.apache.commons.lang3.ObjectUtils;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -44,32 +45,20 @@ import java.util.concurrent.TimeUnit;
 
 public class MeasureFirmness extends AppCompatActivity implements SensorEventListener {
 
-//    private final Handler handler = new Handler();
-//    private Runnable timer1;
-//    private Runnable timer2;
-//    private LineGraphSeries<DataPoint> series1;
-//    private LineGraphSeries series2;
     private SensorManager sensorManager;
     private TextView mTextAcc;
-//    private double graph2LastXValue = 5.00;
-    private long lastTime = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
-    private long time;
-    private double yValue;
-    private double zValue;
-    private double xValue;
-    private List<String> dataList = new ArrayList<>();
-    private int count;
-    private long currentTime;
-    private int mSecond;
+    private double xValue, yValue, zValue;
+    private double freeFallBeginTime;
+    private double freeFallEndTime;
     private String[] entry;
     private List<String[]> entries = new ArrayList<>();
-    private int entryElement = 0;
     long MillisecondTime, StartTime, TimeBuff, UpdateTime = 0L;
-    Handler handler;
     int Seconds, Minutes, MilliSeconds ;
     private Button startButton, resetButton, pauseButton;
     private boolean wasClicked;
+    private boolean begin;
 
+    Handler handler;
     Sensor accelerometer;
     Sensor gyroscope;
 
@@ -79,9 +68,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         setContentView(R.layout.activity_measure_firmness);
 
         wasClicked = false;
-
+        begin = false;
         handler = new Handler();
-
         mTextAcc = (TextView) findViewById(R.id.labelAcc);
 
         resetButton = (Button) findViewById(R.id.button6);
@@ -114,10 +102,11 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 resetButton.setEnabled(true);
                 wasClicked = false;
 
+                getFirmnessRating();
+
                 toastIt("RECORDING PAUSED");
                 toastIt("Size of list: " + String.valueOf(entries.size()));
-
-                // getFirmnessRating();
+                toastIt("Firmness Rating: " + String.valueOf(getFirmnessRating()));
             }
         });
 
@@ -129,6 +118,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 handler.postDelayed(runnable, 0);
                 resetButton.setEnabled(false);
                 wasClicked = true;
+                begin = true;
 
                 toastIt("RECORDING STARTED");
             }
@@ -142,7 +132,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
 
         // Register the sensorManager to listen for accelerometer and gyroscope data
-        sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
+        sensorManager.registerListener(MeasureFirmness.this, accelerometer, 1000000);
         sensorManager.registerListener(MeasureFirmness.this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
 
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
@@ -155,6 +145,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 saveOnClick(view);
             }
         });
+        fab.setImageResource(R.drawable.ic_baseline_save_alt_24px);
 
         LineGraphSeries series = new LineGraphSeries<DataPoint>();
         GraphView graph = findViewById(R.id.graph);
@@ -178,8 +169,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     @Override
     public void onSensorChanged(final SensorEvent sensorEvent) {
         synchronized (this){
-            // Set current y-coordinate value
 
+            // Filter to get only accelerometer data
             if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER){
                 xValue = sensorEvent.values[0];
                 yValue = sensorEvent.values[1];
@@ -187,15 +178,15 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
                 if (wasClicked){
                     String yVal = String.valueOf(yValue);
-                    String tim = String.valueOf(Seconds + "." + MilliSeconds);
+                    String tim = String.valueOf(sensorEvent.timestamp);
 
-                    getFirmnessRating(tim, xValue, yValue, zValue);
+                    freefallMonitor(xValue, yValue, zValue);
 
                     entry = new String[]{tim, yVal};
                     entries.add(entry);
 
+                    // Live feed of y-coordinate accelerometer values printed to logcat with the tag "VALUESHERE"
                     Log.d("VALUESHERE", yVal);
-                    //toastIt("Size of list is: " + String.valueOf(entries.size()));
                 }
             }
         }
@@ -213,6 +204,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         sensorManager.unregisterListener(this);
     }
 
+    // Save recorded data to a .csv file and export it to the phones storage
+    // When the user taps the floating action button
     public void saveOnClick(View view){
         // Get the directory of the phones file storage, make a file name, then append the two to form the file path
         String baseDir = getApplicationContext().getFilesDir().getPath();
@@ -253,23 +246,22 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         printList();
     }
 
+    // A utility method to easily make toasts
     public void toastIt(String message){
         Toast.makeText(MeasureFirmness.this, message, Toast.LENGTH_SHORT).show();
     }
 
+    // Runnable for the timer
+    // Updates the timer text
     private Runnable runnable = new Runnable(){
         @Override
         public void run(){
             MillisecondTime = SystemClock.uptimeMillis() - StartTime;
-
             UpdateTime = TimeBuff + MillisecondTime;
 
             Seconds = (int) (UpdateTime / 1000);
-
             Minutes = Seconds / 60;
-
             Seconds = Seconds % 60;
-
             MilliSeconds = (int) (UpdateTime % 1000);
 
             mTextAcc.setText("" + String.format("%02d",Minutes) + ":"
@@ -280,30 +272,85 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         }
     };
 
+    // Prints current list to the logcat with the tag "PRINTLIST"
     public void printList(){
         for (int i = 0; i < entries.size(); i++){
             Log.d("PRINTLIST", Arrays.toString(entries.get(i)));
         }
     }
 
-    public int getFirmnessRating(String time, double x, double y, double z){
-
+    // Get mattress firmness rating
+    // Called when the user presses pause or when the system stops recording automatically
+    // Returns an integer rating on a scale of 1-10; 1 being the firmest, 10 being the softest
+    public int getFirmnessRating(){
         int rating = 0;
+        double maxPeak = 0.0;
+        double lastPeakTime = 0.0;
+        double timeOfMaxPeak = 0.0;
+        double timeDiff = 0.0;
+        double bounceDuration = 0.0;
+        double val;
+        double currentTime;
+
+        // Gets the max peak value of the recording and its timestamp
+        for (int i = 0; i < entries.size(); i++){
+
+            // Get y-coordinate accelerometer value of list
+            String[] vals = entries.get(i);
+            val = Double.valueOf(vals[1]);
+            currentTime = Double.valueOf(vals[0]);
+
+            // Get the maximum peak value of y-coordinate acceleration of the drop (moment of impact) and its timestamp
+            if (val > maxPeak){
+                maxPeak = val;
+                timeOfMaxPeak = currentTime;
+            }
+
+            // Get the last peak within reason (Any bounce once second after the drop is likely the user picking the phone up)
+            if (val > 5.0 && ((currentTime - timeOfMaxPeak) < 1000)){
+                lastPeakTime = currentTime;
+            }
+        }
+
+        // Time difference between the last moment of detected free fall and the impact acceleration
+        timeDiff = timeOfMaxPeak - freeFallEndTime;
+
+        // Duration of the bounce
+        bounceDuration = lastPeakTime - timeOfMaxPeak;
+
+        // Here is the part of the code where determining the firmness rating would go
+        // The rating is determined by a combination of the max y-coordinate acceleration value and the time difference
+        // between the time of max acceleration and the end time of the phones free fall (when the phone impacts the surface)
+
+
+        return rating;
+    }
+
+    // Detects if the phone is in free fall by observing the root square of all three accelerometer vectors
+    // If all three vectors approach zero, that means they are falling with gravity and thus, not feeling the gravity
+    // Returns true while the phone is in free fall and data is being recorded, false otherwise.
+    public boolean freefallMonitor(double x, double y, double z){
+
         double rootSquare;
 
         rootSquare = Math.sqrt(Math.pow(x ,2) + Math.pow(y ,2) + Math.pow(z ,2));
 
         if (rootSquare < 2.0){
-            toastIt("Freefall detected");
+            Log.d("FREEFALLING", "Free falling!");
+
+            // Set the begin time of the free fall
+            // begin resets to true when the pause or reset button are tapped
+            if (begin){
+                freeFallBeginTime = Double.valueOf(Seconds + "." + MilliSeconds);
+                begin = false;
+            }
+
+            // The end time will keep being updated until the last moment of detected free fall
+            freeFallEndTime = Double.valueOf(Seconds + "." + MilliSeconds);
+            return true;
         }
 
-        // gets the y-coordinate acceleration values of recorded drop
-        for (int i = 0; i < entries.size(); i++){
-
-
-        }
-
-        return rating;
+        return false;
     }
 }
 
