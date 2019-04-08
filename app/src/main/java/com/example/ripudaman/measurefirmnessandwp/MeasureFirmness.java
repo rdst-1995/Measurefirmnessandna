@@ -47,6 +47,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
     private SensorManager sensorManager;
     private TextView mTextAcc;
+    private TextView rating;
     private double xValue, yValue, zValue;
     private double freeFallBeginTime;
     private double freeFallEndTime;
@@ -132,7 +133,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
 
         // Register the sensorManager to listen for accelerometer and gyroscope data
-        sensorManager.registerListener(MeasureFirmness.this, accelerometer, 1000000);
+        sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
         sensorManager.registerListener(MeasureFirmness.this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
 
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
@@ -177,12 +178,14 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 zValue = sensorEvent.values[2];
 
                 if (wasClicked){
+                    String xVal = String.valueOf(xValue);
                     String yVal = String.valueOf(yValue);
-                    String tim = String.valueOf(sensorEvent.timestamp);
+                    String zVal = String.valueOf(zValue);
+                    String time = String.valueOf(sensorEvent.timestamp);
 
                     freefallMonitor(xValue, yValue, zValue);
 
-                    entry = new String[]{tim, yVal};
+                    entry = new String[]{time, xVal, yVal, zVal};
                     entries.add(entry);
 
                     // Live feed of y-coordinate accelerometer values printed to logcat with the tag "VALUESHERE"
@@ -284,44 +287,38 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     // Returns an integer rating on a scale of 1-10; 1 being the firmest, 10 being the softest
     public int getFirmnessRating(){
         int rating = 0;
+        int maxPeakPosition = getMaxPeakPosition();
         double maxPeak = 0.0;
-        double lastPeakTime = 0.0;
         double timeOfMaxPeak = 0.0;
-        double timeDiff = 0.0;
+        double freeFallDuration = 0.0;
         double bounceDuration = 0.0;
-        double val;
-        double currentTime;
+        double heightOfDrop = 0.0;
+        double impactSpeed = 0.0;
+        double impactForce = 0.0;
+        double stoppageTime = 0.0;
 
-        // Gets the max peak value of the recording and its timestamp
-        for (int i = 0; i < entries.size(); i++){
+        String maxPeakValues[] = entries.get(maxPeakPosition);
+        maxPeak = Double.valueOf(maxPeakValues[1]);
+        timeOfMaxPeak = Double.valueOf(maxPeakValues[0]);
+        bounceDuration = getBounceDuration(maxPeakPosition);
+        freeFallDuration = getFreeFallDuration();
+        heightOfDrop = calculateHeight(freeFallDuration);
+        impactSpeed = calculateImpactSpeed(heightOfDrop);
+        impactForce = calculateImpactForce(impactSpeed, heightOfDrop);
+        stoppageTime = freeFallEndTime - timeOfMaxPeak;
 
-            // Get y-coordinate accelerometer value of list
-            String[] vals = entries.get(i);
-            val = Double.valueOf(vals[1]);
-            currentTime = Double.valueOf(vals[0]);
-
-            // Get the maximum peak value of y-coordinate acceleration of the drop (moment of impact) and its timestamp
-            if (val > maxPeak){
-                maxPeak = val;
-                timeOfMaxPeak = currentTime;
-            }
-
-            // Get the last peak within reason (Any bounce once second after the drop is likely the user picking the phone up)
-            if (val > 5.0 && ((currentTime - timeOfMaxPeak) < 1000)){
-                lastPeakTime = currentTime;
-            }
-        }
-
-        // Time difference between the last moment of detected free fall and the impact acceleration
-        timeDiff = timeOfMaxPeak - freeFallEndTime;
-
-        // Duration of the bounce
-        bounceDuration = lastPeakTime - timeOfMaxPeak;
+        Log.i("RATING", "MAX VALUE: " + String.valueOf(maxPeak) +
+                " | TIME OF PEAK: " + String.valueOf(timeOfMaxPeak) +
+                " | BOUNCE DURATION: " + String.valueOf(bounceDuration) +
+                " | FREE FALL DURATION: " + String.valueOf(freeFallDuration) +
+                " | HEIGHT OF DROP: " + String.valueOf(heightOfDrop) +
+                " | IMPACT SPEED: " + String.valueOf(impactSpeed) +
+                " | IMPACT FORCE: " + String.valueOf(impactForce) +
+                " | STOP TIME: " + String.valueOf(stoppageTime));
 
         // Here is the part of the code where determining the firmness rating would go
         // The rating is determined by a combination of the max y-coordinate acceleration value and the time difference
         // between the time of max acceleration and the end time of the phones free fall (when the phone impacts the surface)
-
 
         return rating;
     }
@@ -351,6 +348,95 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         }
 
         return false;
+    }
+
+    // Gets the position in the entry list of the recording of the max peak value (impact)
+    public int getMaxPeakPosition(){
+        double maxPeak = 0.0;
+        int posOfMaxPeak = 0;
+
+        for (int i = 0; i < entries.size(); i++){
+            String[] vals = entries.get(i);
+            double val = Double.valueOf(vals[1]);
+
+            // Get the position in the list of the max peak value
+            if (val > maxPeak){
+                maxPeak = val;
+                posOfMaxPeak = i;
+            }
+        }
+
+        return posOfMaxPeak;
+    }
+
+    public double getBounceDuration(int maxPeakPosition){
+        int count = 0;
+        double change;
+        double previousValue = 0.0;
+        double beginTime;
+        double endTime = 0.0;
+        double duration;
+
+        String initialValues[] = entries.get(maxPeakPosition);
+        beginTime = Double.valueOf(initialValues[0]);
+
+
+        for (int i = maxPeakPosition; i < entries.size(); i++){
+            String vals[] = entries.get(i);
+            double value = Double.valueOf(vals[1]);
+
+            change = Math.abs(value - previousValue);
+
+            // If there hasn't been much of a change with the last 20 data points, then the phone is done bouncing
+            if (change < 2.0){
+                count++;
+            }
+            else
+                count = 0;
+
+            if (count == 20){
+                String endVals[] = entries.get(i);
+                endTime = Double.valueOf(endVals[0]);
+                break;
+            }
+
+            previousValue = value;
+        }
+
+        duration = endTime - beginTime;
+
+        return duration;
+    }
+
+    public double getFreeFallDuration(){
+        return freeFallEndTime - freeFallEndTime;
+    }
+
+    public double calculateHeight(double dropDuration){
+        double height;
+
+        height = 0.5 * 9.81 * Math.pow(dropDuration, 2);
+
+        return height;
+    }
+
+    public double calculateImpactSpeed(double height){
+        double impactSpeed;
+
+        impactSpeed = Math.sqrt(2 * 9.81 * height);
+
+        return impactSpeed;
+    }
+
+    public double calculateImpactForce(double finalVelocity, double height){
+        double force;
+
+        // Average smartphone weighs between 140 and 170 grams
+        double mass = 0.000150;
+
+        force = (0.5 * mass * Math.pow(finalVelocity, 2)) / height;
+
+        return force;
     }
 }
 
