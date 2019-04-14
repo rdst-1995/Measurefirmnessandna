@@ -26,7 +26,11 @@
         <activity
             android:name=".MeasureNoise"
             android:label="@string/title_activity_noise"
-            android:theme="@style/AppTheme.NoActionBar"></activity>
+            android:theme="@style/AppTheme.NoActionBar"/>
+        <activity
+            android:name=".NoiseSetupPage"
+            android:label="Setup Record Time"
+            android:theme="@style/AppTheme.NoActionBar"/>
     </application>
 
 </manifest>

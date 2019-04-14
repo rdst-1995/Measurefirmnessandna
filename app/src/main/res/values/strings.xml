@@ -2,4 +2,5 @@
     <string name="app_name">Measure firmness and wp</string>
     <string name="title_activity_measure_firmness">Measure Surface Firmness</string>
     <string name="title_activity_noise">Measure Noise Ambience</string>
+    <string name="title_noise_setup">Set Record Times</string>
 </resources>
