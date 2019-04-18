@@ -52,10 +52,10 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     private TextView maxVal, bounce, freefall, height, speed, force, stoptime;
     private int count;
     private long timestamp;
-    private long beginTime;
-    private long endTime;
-    private long savedTime;
-    private long settleTime;
+    private double beginTime;
+    private double endTime;
+    private double savedTime;
+    private double settleTime;
     private long sensorTimeReference = 0l;
     private long myTimeReference = 0l;
     private double savedMax;
@@ -82,8 +82,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         setContentView(R.layout.activity_measure_firmness);
 
         count = 0;
-        savedPreviousValue = 0.0;
-        savedMax = 0.0;
+        savedPreviousValue = -1.0;
+        savedMax = -1.0;
 
         wasClicked = false;
         begin = false;
@@ -119,7 +119,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 wasClicked = false;
                 freeFallDetected = false;
 
-                // Reset values
+                // Reset text values
                 maxVal.setText("Maximum Acceleration Value");
                 bounce.setText("Bounce Duration");
                 freefall.setText("Free-Fall Duration");
@@ -128,7 +128,12 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 force.setText("Impact Force");
                 stoptime.setText("Time the phone took to stop");
 
-                // Clear the entries in the data list for a new recording
+                // Reset variables
+                count = 0;
+                savedPreviousValue = -1.0;
+                savedMax = -1.0;
+
+                // Clear the entries in the data list and list of forces for a new recording
                 entries.clear();
                 forceList.clear();
 
@@ -216,6 +221,11 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     public void onSensorChanged(final SensorEvent sensorEvent) {
         synchronized (this){
 
+            // Static time for the rest of this events calculations
+            String second = String.valueOf(Seconds);
+            String millis = String.valueOf(MilliSeconds);
+            String currentTime = second + "." + millis;
+
             // set reference times
             if(sensorTimeReference == 0l && myTimeReference == 0l) {
                 sensorTimeReference = sensorEvent.timestamp;
@@ -230,19 +240,13 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             double z;
             double change;
             double currentForce;
-            double maxForce = 0;
-            long freeFallBeginTime;
-            long freeFallEndTime;
-            long currentTime;
+            double maxForce = -1;
 
             // Filter to get only accelerometer data
             if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER){
                 x = sensorEvent.values[0];
                 y = sensorEvent.values[1];
                 z = sensorEvent.values[2];
-
-                // Gets the time in Milliseconds
-                currentTime = sensorEvent.timestamp;
 
                 currentForce = getDynamicForce(getResultantVector(x, y, z));
 
@@ -253,35 +257,33 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                     String zVal = String.valueOf(z);
                     String time = String.valueOf(currentTime);
 
-                    if (freefallMonitor(x, y, z, currentTime)){
+                    if (freefallMonitor(x, y, z)){
                         freeFallDetected = true;
 
 
                         // Set the begin time of the free fall
                         // begin resets to true when the pause or reset button are tapped
                         if (begin){
-                            freeFallBeginTime = currentTime;
-                            beginTime = currentTime;
+                            beginTime = Double.valueOf(currentTime);
                             begin = false;
 
-                            Log.d("begintime", String.valueOf(freeFallBeginTime));
+                            Log.d("begintime", String.valueOf(beginTime));
                         }
 
                         // The end time will keep being updated until the last moment of detected free fall
-                        freeFallEndTime = currentTime;
-                        endTime = currentTime;
-                        Log.d("endtime", String.valueOf(freeFallEndTime));
+                        endTime = Double.valueOf(currentTime);
+                        Log.d("endtime", String.valueOf(endTime));
                     }
 
                     // Save the maximum acceleration value in the z-coordinate
                     if (z > savedMax){
                         savedMax = z;
-                        savedTime = currentTime;
+                        savedTime = Double.valueOf(currentTime);
 
                         maxVal.setText(String.valueOf(savedMax));
-
-                        Log.d("savedmax", String.valueOf(savedMax) + " | " + String.valueOf(savedTime));
                     }
+
+                    Log.d("savedmax", String.valueOf(savedMax) + " | " + String.valueOf(savedTime));
 
                     if (currentForce > maxForce)
                     {
@@ -299,7 +301,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                         count = 0;
 
                     if (count == 20){
-                        settleTime = currentTime;
+                        settleTime = Double.valueOf(currentTime);
 
                         Log.d("settletime", String.valueOf(settleTime));
                     }
@@ -314,7 +316,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                     savedPreviousValue = z;
 
                     // Live feed of y-coordinate accelerometer values printed to logcat with the tag "VALUESHERE"
-                    Log.d("VALUESHERE", yVal);
+                    Log.d("VALUESHERE", zVal);
                 }
             }
         }
@@ -412,9 +414,9 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     public int getFirmnessRating(){
 
         int rating = 0;
-        long freeFallDuration;
-        long bounceDuration;
-        long stoppageTime;
+        double freeFallDuration;
+        double bounceDuration;
+        double stoppageTime;
         double heightOfDrop;
         double impactSpeed;
         double impactForce;
@@ -439,6 +441,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         if (freeFallDetected){
 
             // Update display to show free fall statistics
+            maxVal.setText(String.valueOf(savedMax));
             bounce.setText(String.valueOf(bounceDuration));
             freefall.setText(String.valueOf(freeFallDuration));
             height.setText(String.valueOf(heightOfDrop));
@@ -459,7 +462,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
      * Detects if the phone is in free fall by observing the root square of all three accelerometer vectors
      * If all three vectors approach zero, that means they are falling with gravity and thus, not feeling the gravity
      * Returns true while the phone is in free fall and data is being recorded, false otherwise.*/
-    public boolean freefallMonitor(double x, double y, double z, long time){
+    public boolean freefallMonitor(double x, double y, double z){
 
         double rootSquare;
 
@@ -478,12 +481,12 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
      * Gets the bounce duration after initial impact of the phone with the test surface
      * settleTime is set when the the system doesn't detect a change greater than a certain threshold for more than 20 datapoints
      * saveTime is the time of the maximum acceleration (impact acceleration)*/
-    public long getBounceDuration(){ return settleTime - savedTime; }
+    public double getBounceDuration(){ return settleTime - savedTime; }
 
     /**
      * Function to calculate the duration of the phone's freefall
      * The values used for this calculation are determined by freeFallMonitor*/
-    public long getFreeFallDuration(){
+    public double getFreeFallDuration(){
         return endTime - beginTime;
     }
 
@@ -491,7 +494,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
      * Function to calcuate the height of the drop
      * Utilizes the phones drop duration for the calculation
      * The formula is: (1/2)*g*t^2   where t is the drop duration*/
-    public double calculateHeight(long dropDuration){
+    public double calculateHeight(double dropDuration){
 
         double height;
         height = 0.5 * 9.81 * Math.pow(dropDuration, 2);
