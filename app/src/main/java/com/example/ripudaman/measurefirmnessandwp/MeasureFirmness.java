@@ -7,6 +7,7 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.icu.util.Measure;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -46,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 
 public class MeasureFirmness extends AppCompatActivity implements SensorEventListener {
 
+    public static final int MY_PERMISSIONS_REQUEST_WRITE_EXTERNAL_STORAGE = 6;
     private SensorManager sensorManager;
     private TextView mTextAcc;
     private TextView firmnessRating;
@@ -56,11 +58,9 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     private double endTime;
     private double savedTime;
     private double settleTime;
-    private long sensorTimeReference = 0l;
-    private long myTimeReference = 0l;
     private double savedMax;
     private double savedPreviousValue;
-    private double xValue, yValue, zValue;
+    private double savedMaxChange;
     private String[] entry;
     private List<String[]> entries = new ArrayList<>();
     private List<String[]> forceList = new ArrayList<>();
@@ -193,6 +193,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             @Override
             public void onClick(View view) {
                 saveOnClick(view);
+                checkPermissions();
             }
         });
         fab.setImageResource(R.drawable.ic_baseline_save_alt_24px);
@@ -225,15 +226,6 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             String second = String.valueOf(Seconds);
             String millis = String.valueOf(MilliSeconds);
             String currentTime = second + "." + millis;
-
-            // set reference times
-            if(sensorTimeReference == 0l && myTimeReference == 0l) {
-                sensorTimeReference = sensorEvent.timestamp;
-                myTimeReference = System.currentTimeMillis();
-            }
-            // set event timestamp to current time in milliseconds
-            sensorEvent.timestamp = myTimeReference +
-                    Math.round((sensorEvent.timestamp - sensorTimeReference) / 1000000.0);
 
             double x;
             double y;
@@ -557,5 +549,62 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             Log.d("FORCELIST", Arrays.toString(forceList.get(i)));
         }
     }
+
+    public void checkPermissions(){
+        if (ContextCompat.checkSelfPermission(MeasureFirmness.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+
+            // Permission is not granted
+            // Should we show an explanation?
+            if (ActivityCompat.shouldShowRequestPermissionRationale(MeasureFirmness.this,
+                    Manifest.permission.READ_CONTACTS)) {
+                // Show an explanation to the user *asynchronously* -- don't block
+                // this thread waiting for the user's response! After the user
+                // sees the explanation, try again to request the permission.
+            }
+            else {
+                // No explanation needed; request the permission
+                ActivityCompat.requestPermissions(MeasureFirmness.this,
+                        new String[]{Manifest.permission.READ_CONTACTS},
+                        MY_PERMISSIONS_REQUEST_WRITE_EXTERNAL_STORAGE);
+
+                // MY_PERMISSIONS_REQUEST_WRITE_EXTERNAL_STORAGE is an
+                // app-defined int constant. The callback method gets the
+                // result of the request.
+            }
+        }
+        else {
+            // Permission already granted
+
+            Log.d("PERMISSIONS", "Permission already granted");
+        }
+
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           String[] permissions, int[] grantResults) {
+        switch (requestCode) {
+            case MY_PERMISSIONS_REQUEST_WRITE_EXTERNAL_STORAGE: {
+                // If request is cancelled, the result arrays are empty.
+                if (grantResults.length > 0
+                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    // permission was granted, yay! Do the
+                    // contacts-related task you need to do.
+                } else {
+                    // permission denied, boo! Disable the
+                    // functionality that depends on this permission.
+                    startButton.setEnabled(false);
+                    pauseButton.setEnabled(false);
+                    resetButton.setEnabled(false);
+                }
+                return;
+            }
+
+            // other 'case' lines to check for other
+            // permissions this app might request.
+        }
+    }
+
 }
 
