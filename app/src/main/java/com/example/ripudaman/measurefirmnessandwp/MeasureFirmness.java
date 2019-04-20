@@ -48,26 +48,31 @@ import java.util.concurrent.TimeUnit;
 public class MeasureFirmness extends AppCompatActivity implements SensorEventListener {
 
     public static final int MY_PERMISSIONS_REQUEST_WRITE_EXTERNAL_STORAGE = 6;
+
     private SensorManager sensorManager;
-    private TextView mTextAcc;
-    private TextView firmnessRating;
-    private TextView maxVal, bounce, freefall, height, speed, force, stoptime;
+    private TextView timerText;
+    private TextView maxAccText;
+    private TextView currentAccText;
+    private TextView currentForceText;
+    private TextView maxForceText;
     private int count;
-    private long timestamp;
     private double beginTime;
     private double endTime;
-    private double savedTime;
     private double settleTime;
-    private double savedMax;
-    private double savedPreviousValue;
-    private double savedMaxChange;
-    private String[] entry;
-    private List<String[]> entries = new ArrayList<>();
-    private List<String[]> forceList = new ArrayList<>();
+    private double maxAcc;
+    private double maxAccTime;
+    private double maxForce;
+    private double maxChange;
+    private double previousValue;
+    private List<String[]> accData = new ArrayList<>();
+    private List<String[]> forceData = new ArrayList<>();
     private Button startButton, resetButton, pauseButton;
+    private Button measureFirmnessButton;
     private boolean wasClicked;
     private boolean begin;
     private boolean freeFallDetected;
+    private boolean firstFreeFall;
+    private boolean impactDetected;
 
     long MillisecondTime, StartTime, TimeBuff, UpdateTime = 0L;
     int Seconds, Minutes, MilliSeconds;
@@ -82,123 +87,21 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         setContentView(R.layout.activity_measure_firmness);
 
         count = 0;
-        savedPreviousValue = -1.0;
-        savedMax = -1.0;
+        previousValue = -1.0;
+        maxAcc = -1.0;
+        maxForce = -1.0;
 
         wasClicked = false;
         begin = false;
         freeFallDetected = false;
+        firstFreeFall = true;
 
         handler = new Handler();
 
-        mTextAcc = findViewById(R.id.labelAcc);
-        maxVal = findViewById(R.id.max_value);
-        bounce = findViewById(R.id.bounce);
-        freefall = findViewById(R.id.freefall);
-        height = findViewById(R.id.height);
-        speed = findViewById(R.id.speed);
-        force = findViewById(R.id.force);
-        stoptime = findViewById(R.id.stoptime);
-        firmnessRating = findViewById(R.id.firmness_rating);
-
-        resetButton = (Button) findViewById(R.id.button6);
-        resetButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-
-                // Reset time
-                MillisecondTime = 0L;
-                StartTime = 0L;
-                TimeBuff = 0L;
-                UpdateTime = 0L;
-                Seconds = 0;
-                Minutes = 0;
-                MilliSeconds = 0;
-                mTextAcc.setText("00:00:00");
-
-                wasClicked = false;
-                freeFallDetected = false;
-
-                // Reset text values
-                maxVal.setText("Maximum Acceleration Value");
-                bounce.setText("Bounce Duration");
-                freefall.setText("Free-Fall Duration");
-                height.setText("Drop Height");
-                speed.setText("Impact Speed");
-                force.setText("Impact Force");
-                stoptime.setText("Time the phone took to stop");
-
-                // Reset variables
-                count = 0;
-                savedPreviousValue = -1.0;
-                savedMax = -1.0;
-
-                // Clear the entries in the data list and list of forces for a new recording
-                entries.clear();
-                forceList.clear();
-
-                toastIt("RECORDING RESET");
-            }
-        });
-
-        pauseButton = (Button) findViewById(R.id.pauseButton);
-        pauseButton.setOnClickListener(new View.OnClickListener(){
-            @Override
-            public void onClick(View view){
-                TimeBuff += MillisecondTime;
-                handler.removeCallbacks(runnable);
-                resetButton.setEnabled(true);
-                wasClicked = false;
-
-                firmnessRating.setText(String.valueOf(getFirmnessRating()));
-
-                toastIt("RECORDING PAUSED");
-                toastIt("Size of list: " + String.valueOf(entries.size()));
-            }
-        });
-
-        startButton = (Button) findViewById(R.id.startButton);
-        startButton.setOnClickListener(new View.OnClickListener(){
-            @Override
-            public void onClick(View view){
-                StartTime = SystemClock.uptimeMillis();
-                handler.postDelayed(runnable, 0);
-                resetButton.setEnabled(false);
-                wasClicked = true;
-                begin = true;
-                freeFallDetected = false;
-
-                entries.clear();
-
-                toastIt("RECORDING STARTED");
-            }
-        });
-
-        // Instantiate sensorManager
-        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-
-        // Instantiate accelerometer and gyroscope
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-
-        // Register the sensorManager to listen for accelerometer and gyroscope data
-        sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
-        sensorManager.registerListener(MeasureFirmness.this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
-
-        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-
-        FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
-        fab.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                saveOnClick(view);
-                checkPermissions();
-            }
-        });
-        fab.setImageResource(R.drawable.ic_baseline_save_alt_24px);
-
-        Log.d("WASCLICKED", String.valueOf(wasClicked));
+        initializeTextViews();
+        initializeToolbar();
+        initializeButtons();
+        initializeSensors();
     }
 
     @Override
@@ -232,7 +135,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             double z;
             double change;
             double currentForce;
-            double maxForce = -1;
+            double resultantVector;
 
             // Filter to get only accelerometer data
             if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER){
@@ -240,75 +143,80 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 y = sensorEvent.values[1];
                 z = sensorEvent.values[2];
 
-                currentForce = getDynamicForce(getResultantVector(x, y, z));
+                // Get the average acceleration of this accelerometer event
+                resultantVector = getResultantVector(x, y, z);
+
+                // Get the current force on the phone calculated from this events average acceleration
+                currentForce = getDynamicForce(resultantVector);
+
+                // Get the change in acceleration compared to the last event
+                change = Math.abs(resultantVector - previousValue);
+
+                // Store the event data
+                storeTestData(x, y, z, currentTime, resultantVector, currentForce);
+
+                // Dynamically store the maximum values for acceleration, force, the change in acceleration, and the time of the respective maximum value
+                saveMaxValues(resultantVector, currentForce, change, currentTime);
 
                 // Save values and perform data analysis when the user starts recording their test
                 if (wasClicked){
-                    String xVal = String.valueOf(x);
-                    String yVal = String.valueOf(y);
-                    String zVal = String.valueOf(z);
-                    String time = String.valueOf(currentTime);
 
-                    if (freefallMonitor(x, y, z)){
+                    // Update texts now that we're recording
+                    currentAccText.setText(String.format("%02f", resultantVector));
+                    maxAccText.setText(String.format("%02f", maxAcc));
+                    currentForceText.setText(String.format("%02f", currentForce));
+                    maxForceText.setText(String.format("%02f", maxForce));
+
+
+                    // If free fall is detected
+                    if (freefallMonitor(resultantVector)){
                         freeFallDetected = true;
 
-
                         // Set the begin time of the free fall
-                        // begin resets to true when the pause or reset button are tapped
+                        // 0.15 accounts for the delay in detecting the free fall
                         if (begin){
-                            beginTime = Double.valueOf(currentTime);
+                            beginTime = Double.valueOf(currentTime) + 0.15;
                             begin = false;
 
                             Log.d("begintime", String.valueOf(beginTime));
                         }
 
-                        // The end time will keep being updated until the last moment of detected free fall
-                        endTime = Double.valueOf(currentTime);
-                        Log.d("endtime", String.valueOf(endTime));
+                        // Set the end of the first observed free fall in the test
+                        // A bounce would probably trigger the detector and thus set the wrong end time
+                        if (firstFreeFall){
+                            endTime = Double.valueOf(currentTime);
+                            firstFreeFall = false;
+                            Log.d("endtime", String.valueOf(endTime));
+                        }
                     }
 
-                    // Save the maximum acceleration value in the z-coordinate
-                    if (z > savedMax){
-                        savedMax = z;
-                        savedTime = Double.valueOf(currentTime);
+                    // If a free fall was detected and an impact was detected, determine when the phone settles
+                    if (freeFallDetected && impactDetected){
 
-                        maxVal.setText(String.valueOf(savedMax));
+                        maxAccText.setText(String.valueOf(maxAcc));
+
+                        // If there hasn't been much of a change with the last 20 data points,
+                        // then the phone is done bouncing and its 'settle time' is set
+                        if (change < 2.0){
+                            count++;
+                        }
+                        else
+                            count = 0;
+
+                        if (count == 20){
+                            settleTime = Double.valueOf(currentTime);
+
+                            Log.d("settletime", String.valueOf(settleTime));
+                        }
+                    }
+                    else { // Set test values and button text when not recording data
+
                     }
 
-                    Log.d("savedmax", String.valueOf(savedMax) + " | " + String.valueOf(savedTime));
-
-                    if (currentForce > maxForce)
-                    {
-                        maxForce = currentForce;
-                    }
-
-                    change = Math.abs(z - savedPreviousValue);
-
-                    // If there hasn't been much of a change with the last 20 data points,
-                    // then the phone is done bouncing and its 'settle time' is set
-                    if (change < 2.0){
-                        count++;
-                    }
-                    else
-                        count = 0;
-
-                    if (count == 20){
-                        settleTime = Double.valueOf(currentTime);
-
-                        Log.d("settletime", String.valueOf(settleTime));
-                    }
-
-                    entry = new String[]{time, xVal, yVal, zVal};
-                    entries.add(entry);
-
-                    String[] forceEntry;
-                    forceEntry = new String[]{time, String.valueOf(currentForce)};
-                    forceList.add(forceEntry);
-
-                    savedPreviousValue = z;
+                    previousValue = resultantVector;
 
                     // Live feed of y-coordinate accelerometer values printed to logcat with the tag "VALUESHERE"
-                    Log.d("VALUESHERE", zVal);
+                    Log.d("VALUESHERE", String.valueOf(resultantVector));
                 }
             }
         }
@@ -318,49 +226,45 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
      * Save recorded data to a .csv file and export it to the phones storage
      * When the user taps the floating action button*/
     public void saveOnClick(View view){
-        // Get the directory of the phones file storage, make a file name, then append the two to form the file path
-        String baseDir = getApplicationContext().getFilesDir().getPath();
-        String EXPORT_FILE = "export.csv";
-        String filePath = baseDir + File.separator + EXPORT_FILE;
-
-        File absolutePath = Environment.getExternalStorageDirectory();
-        File file2 = new File(absolutePath, EXPORT_FILE);
-
-        File pathfile = new File(Environment.getExternalStorageDirectory()
-                .getAbsolutePath()
-                + File.separator
-                + "csvData");
-
-        // Entry data to save to file
-        File file = new File(String.valueOf(pathfile));
         CSVWriter writer;
 
-        try{
-            // Check to see if file exists
-            if (file.exists() && !file.isDirectory()){
-                FileWriter fileWriter = new FileWriter(file2, true);
-                writer = new CSVWriter(fileWriter);
+        if (isExternalStorageWritable()){
+            // Can save file
+            File outputPath = getPublicDocumentStorageDir("exportFiles");
+            File outputFile = new File(outputPath, "export.csv");
+
+            try{
+                // Check to see if file exists
+                if (outputFile.exists() && !outputFile.isDirectory()){
+                    FileWriter fileWriter = new FileWriter(outputFile, true);
+                    writer = new CSVWriter(fileWriter);
+                }
+                else{
+                    writer = new CSVWriter(new FileWriter(outputFile));
+                }
+
+                Log.d("FILEDEBUG", String.valueOf(outputFile));
+
+                // Save data from list to csv file
+                writer.writeAll(accData);
+                writer.close();
+
+                // Notify the user that the file saved successfully
+                toastIt("File saved successfully!");
+
+            }catch (Exception e){
+                e.printStackTrace();
+                Log.d("FILEDEBUG", String.valueOf(e));
+                toastIt("Save failed");
             }
-            else{
-                writer = new CSVWriter(new FileWriter(file2));
-            }
-
-            Log.d("FILEDEBUG", filePath + " | " + String.valueOf(pathfile) + " | " + file2);
-
-            // Save data from list to csv file
-            writer.writeAll(entries);
-            writer.close();
-
-            // Notify the user that the file saved successfully
-            toastIt("File saved successfully!");
-
-        }catch (Exception e){
-            e.printStackTrace();
-            toastIt("Save failed");
+        }
+        else{
+            // Cannot save file, no external storage available
+            toastIt("No external storage available!");
         }
 
         printList();
-        printForceList();
+        printForceData();
     }
 
     /**
@@ -383,7 +287,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             Seconds = Seconds % 60;
             MilliSeconds = (int) (UpdateTime % 1000);
 
-            mTextAcc.setText("" + String.format("%02d",Minutes) + ":"
+            timerText.setText("" + String.format("%02d",Minutes) + ":"
                     + String.format("%02d", Seconds) + ":"
                     + String.format("%03d", MilliSeconds));
 
@@ -394,8 +298,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     /**
      * Method for debugging the data list*/
     public void printList(){
-        for (int i = 0; i < entries.size(); i++){
-            Log.d("PRINTLIST", Arrays.toString(entries.get(i)));
+        for (int i = 0; i < accData.size(); i++){
+            Log.d("PRINTLIST", Arrays.toString(accData.get(i)));
         }
     }
 
@@ -417,11 +321,11 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         freeFallDuration = getFreeFallDuration();
         heightOfDrop = calculateHeight(freeFallDuration);
         impactSpeed = calculateImpactSpeed(heightOfDrop);
-        impactForce = calculateImpactForce(savedMax);
-        stoppageTime = endTime - savedTime;
+        impactForce = calculateImpactForce(maxAcc);
+        stoppageTime = endTime - maxAccTime;
 
-        Log.i("RATING", "MAX VALUE: " + String.valueOf(savedMax) +
-                " | TIME OF PEAK: " + String.valueOf(savedTime) +
+        Log.i("RATING", "MAX VALUE: " + String.valueOf(maxAcc) +
+                " | TIME OF PEAK: " + String.valueOf(maxAccTime) +
                 " | BOUNCE DURATION: " + String.valueOf(bounceDuration) +
                 " | FREE FALL DURATION: " + String.valueOf(freeFallDuration) +
                 " | HEIGHT OF DROP: " + String.valueOf(heightOfDrop) +
@@ -429,20 +333,12 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 " | IMPACT FORCE: " + String.valueOf(impactForce) +
                 " | STOP TIME: " + String.valueOf(stoppageTime));
 
-        // Only when the user properly dropped the phone so that free fall is detected...
         if (freeFallDetected){
 
-            // Update display to show free fall statistics
-            maxVal.setText(String.valueOf(savedMax));
-            bounce.setText(String.valueOf(bounceDuration));
-            freefall.setText(String.valueOf(freeFallDuration));
-            height.setText(String.valueOf(heightOfDrop));
-            speed.setText(String.valueOf(impactSpeed));
-            force.setText(String.valueOf(impactForce));
-            stoptime.setText(String.valueOf(stoppageTime));
+            measureFirmnessButton.setText(String.valueOf(rating));
         }
-        else{
-            maxVal.setText("No free fall detected");
+        else {
+            measureFirmnessButton.setText("No Drop Detected");
         }
 
         // Determine the rating here
@@ -454,13 +350,9 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
      * Detects if the phone is in free fall by observing the root square of all three accelerometer vectors
      * If all three vectors approach zero, that means they are falling with gravity and thus, not feeling the gravity
      * Returns true while the phone is in free fall and data is being recorded, false otherwise.*/
-    public boolean freefallMonitor(double x, double y, double z){
+    public boolean freefallMonitor(double resultantVector){
 
-        double rootSquare;
-
-        rootSquare = Math.sqrt(Math.pow(x ,2) + Math.pow(y ,2) + Math.pow(z ,2));
-
-        if (rootSquare < 2.0){
+        if (resultantVector < 2.0){
             Log.d("FREEFALLING", "Free falling!");
 
             return true;
@@ -473,7 +365,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
      * Gets the bounce duration after initial impact of the phone with the test surface
      * settleTime is set when the the system doesn't detect a change greater than a certain threshold for more than 20 datapoints
      * saveTime is the time of the maximum acceleration (impact acceleration)*/
-    public double getBounceDuration(){ return settleTime - savedTime; }
+    public double getBounceDuration(){ return settleTime - maxAccTime; }
 
     /**
      * Function to calculate the duration of the phone's freefall
@@ -536,7 +428,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     public double getDynamicForce(double vector){
         double currentForce = 0.160 * vector;
 
-        Log.d("DYNAMICFORCE", String.valueOf(currentForce));
+        //Log.d("DYNAMICFORCE", String.valueOf(currentForce));
 
         return currentForce;
     }
@@ -544,9 +436,9 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     /**
      * Prints the list of logged forces to logcat
      * The values are added dynamically along with the timestamp*/
-    public void printForceList(){
-        for (int i = 0; i < forceList.size(); i++){
-            Log.d("FORCELIST", Arrays.toString(forceList.get(i)));
+    public void printForceData(){
+        for (int i = 0; i < forceData.size(); i++){
+            Log.d("FORCELIST", Arrays.toString(forceData.get(i)));
         }
     }
 
@@ -594,9 +486,6 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 } else {
                     // permission denied, boo! Disable the
                     // functionality that depends on this permission.
-                    startButton.setEnabled(false);
-                    pauseButton.setEnabled(false);
-                    resetButton.setEnabled(false);
                 }
                 return;
             }
@@ -606,5 +495,201 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         }
     }
 
+    /**
+     *  Checks if external storage is available for read and write */
+    public boolean isExternalStorageWritable() {
+        String state = Environment.getExternalStorageState();
+        if (Environment.MEDIA_MOUNTED.equals(state)) {
+            return true;
+        }
+        return false;
+    }
+
+    public File getPublicDocumentStorageDir(String fileName) {
+        // Get the directory for the user's public pictures directory.
+        File file = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS), fileName);
+        if (!file.mkdirs()) {
+            Log.e("FILEDEBUG", "Directory not created");
+        }
+        return file;
+    }
+
+    public void storeTestData(double x, double y, double z, String time, double resultant, double cForce){
+
+        String[] accDataEntry;
+        String[] currentForceDataEntry;
+
+        // Stringify the values to insert into lists
+        String xVal = String.valueOf(x);
+        String yVal = String.valueOf(y);
+        String zVal = String.valueOf(z);
+        String resultantV = String.valueOf(resultant);
+        String currentForce = String.valueOf(cForce);
+
+        // Enter accelerometer data into a list
+        accDataEntry = new String[]{time, xVal, yVal, zVal, resultantV};
+        accData.add(accDataEntry);
+
+        // Add the force for this event to the force data list
+        currentForceDataEntry = new String[]{time, currentForce};
+        forceData.add(currentForceDataEntry);
+    }
+
+    public void saveMaxValues(double acc, double force, double change, String time){
+        // Save the maximum resultant acceleration value
+        if (acc > maxAcc){
+            maxAcc = acc;
+            maxAccTime = Double.valueOf(time);
+
+            if (freeFallDetected && (maxAcc > 14.0)){
+                impactDetected = true;
+            }
+
+            Log.d("savedmax", String.valueOf(maxAcc) + " | " + String.valueOf(maxAccTime));
+        }
+
+        // Save the maximum observed force
+        if (force > maxForce)
+        {
+            maxForce = force;
+
+            Log.d("MAXFORCE", String.valueOf(maxForce));
+        }
+
+        // Save the maximum rate of change
+        if (change > maxChange){
+            maxChange = change;
+
+            Log.d("MAXCHANGE", String.valueOf(maxChange));
+        }
+    }
+
+    public void resetData(){
+        // Reset time
+        MillisecondTime = 0L;
+        StartTime = 0L;
+        TimeBuff = 0L;
+        UpdateTime = 0L;
+        Seconds = 0;
+        Minutes = 0;
+        MilliSeconds = 0;
+
+        wasClicked = false;
+        freeFallDetected = false;
+        impactDetected = false;
+        firstFreeFall = true;
+
+        // Reset text values
+        timerText.setText("00:00:00");
+        currentAccText.setText("0.000000");
+        maxAccText.setText("0.000000");
+        currentForceText.setText("0.000000");
+        maxForceText.setText("0.000000");
+        measureFirmnessButton.setText("FIRMNESS RATING");
+
+        // Reset variables
+        count = 0;
+        previousValue = -1.0;
+        maxAcc = -1.0;
+        maxForce = -1.0;
+        maxChange = -1.0;
+
+        // Clear the entries in the data list and list of forces for a new recording
+        accData.clear();
+        forceData.clear();
+
+        toastIt("RECORDING RESET");
+    }
+
+    public void initializeTextViews(){
+        timerText = findViewById(R.id.timer_text);
+        currentAccText = findViewById(R.id.current_acc_value);
+        maxAccText = findViewById(R.id.max_acc_value);
+        currentForceText = findViewById(R.id.current_force_value);
+        maxForceText = findViewById(R.id.max_force_value);
+    }
+
+    public void initializeToolbar(){
+        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+    }
+
+    public void initializeButtons(){
+        resetButton = (Button) findViewById(R.id.button6);
+        resetButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                resetData();
+            }
+        });
+
+        pauseButton = (Button) findViewById(R.id.pauseButton);
+        pauseButton.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view){
+                TimeBuff += MillisecondTime;
+                handler.removeCallbacks(runnable);
+                resetButton.setEnabled(true);
+                wasClicked = false;
+
+                // Set firmness button text to firmness rating or no free fall detected here
+
+                toastIt("RECORDING PAUSED");
+                toastIt("Size of list: " + String.valueOf(accData.size()));
+            }
+        });
+
+        startButton = (Button) findViewById(R.id.startButton);
+        startButton.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view){
+                StartTime = SystemClock.uptimeMillis();
+                handler.postDelayed(runnable, 0);
+                resetButton.setEnabled(false);
+
+                wasClicked = true;
+                begin = true;
+                freeFallDetected = false;
+                impactDetected = false;
+
+                accData.clear();
+                forceData.clear();
+
+                toastIt("RECORDING STARTED");
+            }
+        });
+
+        FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
+        fab.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                saveOnClick(view);
+                checkPermissions();
+            }
+        });
+        fab.setImageResource(R.drawable.ic_baseline_save_alt_24px);
+
+        measureFirmnessButton = (Button) findViewById(R.id.circle_button);
+        measureFirmnessButton.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view){
+                getFirmnessRating();
+            }
+        });
+    }
+
+    public void initializeSensors(){
+        // Instantiate sensorManager
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+
+        // Instantiate accelerometer and gyroscope
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+
+        // Register the sensorManager to listen for accelerometer and gyroscope data
+        sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
+        sensorManager.registerListener(MeasureFirmness.this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
+    }
 }
 
