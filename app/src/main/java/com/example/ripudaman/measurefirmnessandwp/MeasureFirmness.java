@@ -3,6 +3,7 @@ package com.example.ripudaman.measurefirmnessandwp;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -26,8 +27,11 @@ import android.widget.Toast;
 import android.widget.ToggleButton;
 
 import com.jjoe64.graphview.GraphView;
+import com.jjoe64.graphview.GridLabelRenderer;
+import com.jjoe64.graphview.helper.StaticLabelsFormatter;
 import com.jjoe64.graphview.series.DataPoint;
 import com.jjoe64.graphview.series.LineGraphSeries;
+import com.jjoe64.graphview.series.PointsGraphSeries;
 import com.opencsv.CSVWriter;
 
 import org.apache.commons.lang3.ObjectUtils;
@@ -36,6 +40,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.lang.reflect.Array;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -56,6 +61,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     private TextView currentForceText;
     private TextView maxForceText;
     private int count;
+    private int graphCount;
     private double beginTime;
     private double endTime;
     private double settleTime;
@@ -68,11 +74,14 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     private List<String[]> forceData = new ArrayList<>();
     private Button startButton, resetButton, pauseButton;
     private Button measureFirmnessButton;
+    private GraphView graph;
+    private PointsGraphSeries<DataPoint> series;
     private boolean wasClicked;
     private boolean begin;
     private boolean freeFallDetected;
     private boolean firstFreeFall;
     private boolean impactDetected;
+    private float maxRange;
 
     long MillisecondTime, StartTime, TimeBuff, UpdateTime = 0L;
     int Seconds, Minutes, MilliSeconds;
@@ -85,6 +94,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_measure_firmness);
+
+        checkPermissions();
 
         count = 0;
         previousValue = -1.0;
@@ -102,6 +113,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         initializeToolbar();
         initializeButtons();
         initializeSensors();
+        initializeGraph();
     }
 
     @Override
@@ -136,12 +148,15 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             double change;
             double currentForce;
             double resultantVector;
+            DecimalFormat df = new DecimalFormat("0.00");
 
             // Filter to get only accelerometer data
             if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER){
                 x = sensorEvent.values[0];
                 y = sensorEvent.values[1];
                 z = sensorEvent.values[2];
+                maxRange = sensorEvent.sensor.getMaximumRange();
+
 
                 // Get the average acceleration of this accelerometer event
                 resultantVector = getResultantVector(x, y, z);
@@ -158,14 +173,17 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 // Dynamically store the maximum values for acceleration, force, the change in acceleration, and the time of the respective maximum value
                 saveMaxValues(resultantVector, currentForce, change, currentTime);
 
+                // Add the event acceleration to the real-time graph
+                // graphData(x, y, z, resultantVector, currentTime);
+
                 // Save values and perform data analysis when the user starts recording their test
                 if (wasClicked){
 
                     // Update texts now that we're recording
-                    currentAccText.setText(String.format("%02f", resultantVector));
-                    maxAccText.setText(String.format("%02f", maxAcc));
-                    currentForceText.setText(String.format("%02f", currentForce));
-                    maxForceText.setText(String.format("%02f", maxForce));
+                    currentAccText.setText(df.format(z));
+                    maxAccText.setText(df.format(maxAcc));
+                    currentForceText.setText(df.format(currentForce));
+                    maxForceText.setText(df.format(maxForce));
 
 
                     // If free fall is detected
@@ -193,7 +211,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                     // If a free fall was detected and an impact was detected, determine when the phone settles
                     if (freeFallDetected && impactDetected){
 
-                        maxAccText.setText(String.valueOf(maxAcc));
+                        maxAccText.setText(df.format(maxAcc));
 
                         // If there hasn't been much of a change with the last 20 data points,
                         // then the phone is done bouncing and its 'settle time' is set
@@ -230,7 +248,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
         if (isExternalStorageWritable()){
             // Can save file
-            File outputPath = getPublicDocumentStorageDir("exportFiles");
+            File outputPath = getPublicDocumentStorageDir("BedFirmness");
             File outputFile = new File(outputPath, "export.csv");
 
             try{
@@ -307,15 +325,17 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
      * Get mattress firmness rating
      * Called when the user presses pause or when the system stops recording automatically
      * Returns an integer rating on a scale of 1-10; 1 being the firmest, 10 being the softest*/
-    public int getFirmnessRating(){
+    public void getFirmnessRating(){
 
-        int rating = 0;
+        int rating = 1;
         double freeFallDuration;
         double bounceDuration;
         double stoppageTime;
         double heightOfDrop;
         double impactSpeed;
         double impactForce;
+        double calculation;
+        String conversion;
 
         bounceDuration = getBounceDuration();
         freeFallDuration = getFreeFallDuration();
@@ -333,6 +353,21 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 " | IMPACT FORCE: " + String.valueOf(impactForce) +
                 " | STOP TIME: " + String.valueOf(stoppageTime));
 
+        // Determine the rating here
+        // Multiply the maxRange by 9.81 since maxRange is given in g's (1g = 9.81m/s^s)
+        // Divide the maximum capable acceleration range of the phone by the 10 rating scales
+        // Then divide the maximum detected change by that scale rating to acquire an integer rating 1-10
+        // 1 is firm, 10 is soft
+        calculation = maxChange / 8;
+        conversion = String.valueOf(calculation);
+
+        try {
+            rating = Integer.parseInt(conversion);
+        }catch (NumberFormatException e){
+            Log.d("RATING", String.valueOf(e));
+        }
+
+        // If not free fall was detected, then the user did not drop their phone and a rating cannot be calculated
         if (freeFallDetected){
 
             measureFirmnessButton.setText(String.valueOf(rating));
@@ -340,10 +375,6 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         else {
             measureFirmnessButton.setText("No Drop Detected");
         }
-
-        // Determine the rating here
-
-        return rating;
     }
 
     /**
@@ -506,7 +537,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     }
 
     public File getPublicDocumentStorageDir(String fileName) {
-        // Get the directory for the user's public pictures directory.
+        // Get the directory for the user's public downloads directory.
         File file = new File(Environment.getExternalStoragePublicDirectory(
                 Environment.DIRECTORY_DOWNLOADS), fileName);
         if (!file.mkdirs()) {
@@ -559,7 +590,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
         // Save the maximum rate of change
         if (change > maxChange){
-            maxChange = change;
+            if (freeFallDetected)
+                maxChange = change;
 
             Log.d("MAXCHANGE", String.valueOf(maxChange));
         }
@@ -582,10 +614,10 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
         // Reset text values
         timerText.setText("00:00:00");
-        currentAccText.setText("0.000000");
-        maxAccText.setText("0.000000");
-        currentForceText.setText("0.000000");
-        maxForceText.setText("0.000000");
+        currentAccText.setText("0.00");
+        maxAccText.setText("0.00");
+        currentForceText.setText("0.00");
+        maxForceText.setText("0.00");
         measureFirmnessButton.setText("FIRMNESS RATING");
 
         // Reset variables
@@ -633,7 +665,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 resetButton.setEnabled(true);
                 wasClicked = false;
 
-                // Set firmness button text to firmness rating or no free fall detected here
+                graphData();
 
                 toastIt("RECORDING PAUSED");
                 toastIt("Size of list: " + String.valueOf(accData.size()));
@@ -647,6 +679,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                 StartTime = SystemClock.uptimeMillis();
                 handler.postDelayed(runnable, 0);
                 resetButton.setEnabled(false);
+
+                toastIt(String.valueOf(maxRange * 9.81));
 
                 wasClicked = true;
                 begin = true;
@@ -665,7 +699,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
             @Override
             public void onClick(View view) {
                 saveOnClick(view);
-                checkPermissions();
+                seeMaxRange();
             }
         });
         fab.setImageResource(R.drawable.ic_baseline_save_alt_24px);
@@ -690,6 +724,39 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         // Register the sensorManager to listen for accelerometer and gyroscope data
         sensorManager.registerListener(MeasureFirmness.this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST);
         sensorManager.registerListener(MeasureFirmness.this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
+    }
+
+    public void initializeGraph(){
+        graph = (GraphView) findViewById(R.id.graph);
+
+        GridLabelRenderer gridLabel = graph.getGridLabelRenderer();
+        gridLabel.setHorizontalAxisTitle("Test Number");
+        gridLabel.setVerticalAxisTitle("Max Detected Acc Change");
+
+        graph.setTitle("Maximum Change Detected per Test");
+        graph.getViewport().setScrollableY(true);
+        graph.getViewport().scrollToEnd();
+        graph.getViewport().setXAxisBoundsManual(true);
+        graph.getViewport().setMaxX(15);
+        graph.getViewport().setYAxisBoundsManual(true);
+        graph.getViewport().setMaxY(90.0);
+    }
+
+    public void graphData(){
+
+        if (freeFallDetected){
+            graphCount++;
+
+            series = new PointsGraphSeries<>(new DataPoint[]{
+                    new DataPoint(graphCount, maxChange)
+            });
+            series.setColor(Color.RED);
+            graph.addSeries(series);
+        }
+    }
+
+    public void seeMaxRange(){
+        Log.d("MAXRANGE", String.valueOf(maxRange));
     }
 }
 

@@ -18,7 +18,7 @@
 
     <TextView
         android:id="@+id/current_acc_value"
-        android:text="0.000000"
+        android:text="0.00"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_above="@id/max_acc_value"
@@ -35,7 +35,7 @@
 
     <TextView
         android:id="@+id/max_acc_value"
-        android:text="0.000000"
+        android:text="0.00"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_above="@id/current_force_value"
@@ -53,7 +53,7 @@
 
     <TextView
         android:id="@+id/current_force_value"
-        android:text="0.000000"
+        android:text="0.00"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_toRightOf="@id/circle_button"
@@ -71,7 +71,7 @@
 
     <TextView
         android:id="@+id/max_force_value"
-        android:text="0.000000"
+        android:text="0.00"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_toRightOf="@id/circle_button"
@@ -82,6 +82,7 @@
         android:id="@+id/circle_button"
         android:text="Firmness Rating"
         android:textColor="#2B2B2B"
+        android:textSize="12dp"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_above="@+id/timer_text"
@@ -123,7 +124,7 @@
         android:layout_width="match_parent"
         android:layout_height="200dip"
         android:layout_alignParentBottom="true"
-        android:layout_marginTop="50dp"
+        android:layout_marginTop="15dp"
         android:layout_marginBottom="10dp"
         tools:layout_editor_absoluteX="0dp" />
 

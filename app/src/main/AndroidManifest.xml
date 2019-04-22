@@ -22,7 +22,8 @@
         <activity
             android:name=".MeasureFirmness"
             android:label="@string/title_activity_measure_firmness"
-            android:theme="@style/AppTheme.NoActionBar" />
+            android:theme="@style/AppTheme.NoActionBar"
+            android:screenOrientation="portrait"/>
         <activity
             android:name=".MeasureNoise"
             android:label="@string/title_activity_noise"
