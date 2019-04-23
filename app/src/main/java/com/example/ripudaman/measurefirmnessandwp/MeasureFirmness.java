@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.SystemClock;
+import android.provider.ContactsContract;
 import android.support.design.widget.FloatingActionButton;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -75,7 +76,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     private Button startButton, resetButton, pauseButton;
     private Button measureFirmnessButton;
     private GraphView graph;
-    private PointsGraphSeries<DataPoint> series;
+    private PointsGraphSeries<DataPoint> maxChangeSeries;
+    private PointsGraphSeries<DataPoint> maxAccSeries;
     private boolean wasClicked;
     private boolean begin;
     private boolean freeFallDetected;
@@ -190,18 +192,19 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
                     if (freefallMonitor(resultantVector)){
                         freeFallDetected = true;
 
-                        // Set the begin time of the free fall
-                        // 0.15 accounts for the delay in detecting the free fall
-                        if (begin){
-                            beginTime = Double.valueOf(currentTime) + 0.15;
-                            begin = false;
-
-                            Log.d("begintime", String.valueOf(beginTime));
-                        }
-
-                        // Set the end of the first observed free fall in the test
+                        // Set the end of the first observed free fall in the test and ignore bounces
                         // A bounce would probably trigger the detector and thus set the wrong end time
                         if (firstFreeFall){
+                            // Set the begin time of the free fall
+                            // The begin time will be delayed slightly as the phone takes time to reach gravitational acceleration
+                            // It can be ignored as the time lost in this delay is the same for every test drop
+                            if (begin){
+                                beginTime = Double.valueOf(currentTime);
+                                begin = false;
+
+                                Log.d("begintime", String.valueOf(beginTime));
+                            }
+
                             endTime = Double.valueOf(currentTime);
                             firstFreeFall = false;
                             Log.d("endtime", String.valueOf(endTime));
@@ -248,6 +251,8 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
         if (isExternalStorageWritable()){
             // Can save file
+
+            // Create folder named 'BedFirmness' in users' phone to save files
             File outputPath = getPublicDocumentStorageDir("BedFirmness");
             File outputFile = new File(outputPath, "export.csv");
 
@@ -286,6 +291,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     }
 
     /**
+     * @param: message: A string for making a toast
      * Utility method for making toasts*/
     public void toastIt(String message){
         Toast.makeText(MeasureFirmness.this, message, Toast.LENGTH_SHORT).show();
@@ -369,7 +375,6 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
         // If not free fall was detected, then the user did not drop their phone and a rating cannot be calculated
         if (freeFallDetected){
-
             measureFirmnessButton.setText(String.valueOf(rating));
         }
         else {
@@ -406,7 +411,7 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
     }
 
     /**
-     * Function to calcuate the height of the drop
+     * Function to calculate the height of the drop
      * Utilizes the phones drop duration for the calculation
      * The formula is: (1/2)*g*t^2   where t is the drop duration*/
     public double calculateHeight(double dropDuration){
@@ -567,13 +572,22 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         forceData.add(currentForceDataEntry);
     }
 
+    /**
+     * @param acc: the average acceleration of the event
+     * @param force: the calculated force of the event
+     * @param change: the change in average acceleration compared to the last event
+     * @param time: a string for the time of the event
+     *
+     * This function observe each event, saving the maximum acceleration, force, and change
+     * It also serves as an impact detector*/
     public void saveMaxValues(double acc, double force, double change, String time){
         // Save the maximum resultant acceleration value
         if (acc > maxAcc){
             maxAcc = acc;
             maxAccTime = Double.valueOf(time);
 
-            if (freeFallDetected && (maxAcc > 14.0)){
+            // Impact detection
+            if (freeFallDetected && (maxAcc > 15.0)){
                 impactDetected = true;
             }
 
@@ -731,11 +745,12 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
 
         GridLabelRenderer gridLabel = graph.getGridLabelRenderer();
         gridLabel.setHorizontalAxisTitle("Test Number");
-        gridLabel.setVerticalAxisTitle("Max Detected Acc Change");
+        gridLabel.setVerticalAxisTitle("MaxChange and MaxAcc");
 
-        graph.setTitle("Maximum Change Detected per Test");
+        graph.setTitle("Maximum change/acc per Test");
         graph.getViewport().setScrollableY(true);
         graph.getViewport().scrollToEnd();
+        graph.getViewport().setBorderColor(Color.WHITE);
         graph.getViewport().setXAxisBoundsManual(true);
         graph.getViewport().setMaxX(15);
         graph.getViewport().setYAxisBoundsManual(true);
@@ -747,11 +762,17 @@ public class MeasureFirmness extends AppCompatActivity implements SensorEventLis
         if (freeFallDetected){
             graphCount++;
 
-            series = new PointsGraphSeries<>(new DataPoint[]{
+            maxChangeSeries = new PointsGraphSeries<>(new DataPoint[]{
                     new DataPoint(graphCount, maxChange)
             });
-            series.setColor(Color.RED);
-            graph.addSeries(series);
+            maxChangeSeries.setColor(Color.RED);
+            graph.addSeries(maxChangeSeries);
+
+            maxAccSeries = new PointsGraphSeries<>(new DataPoint[]{
+                    new DataPoint(graphCount, maxAcc)
+            });
+            maxAccSeries.setColor(Color.YELLOW);
+            graph.addSeries(maxAccSeries);
         }
     }
 
